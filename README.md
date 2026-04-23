@@ -46,6 +46,7 @@ As part of our continuous risk management, we have updated our initial Risk Matr
 
 ---
 
+```mermaid
 classDiagram
     %% Abstract Base Class
     class Vehicle {
@@ -85,6 +86,6 @@ classDiagram
     Vehicle <|-- Car : Inheritance (Kalıtım)
     ParkingSpot o-- Vehicle : Aggregation (Birleştirme)
     ParkingLot *-- ParkingSpot : Composition (Kompozisyon)
-
+```
    
 *Developed for Software Project Management Course*
