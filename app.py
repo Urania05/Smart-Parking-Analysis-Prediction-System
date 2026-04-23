@@ -1,119 +1,148 @@
 import streamlit as st
-from ultralytics import YOLO
+import requests
 from PIL import Image
-import numpy as np
-import cv2
+import io
+import joblib
+import pandas as pd
+import datetime
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(
-    page_title="Smart Parking Analysis System",
-    page_icon="🚗",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# Configure the page layout
+st.set_page_config(layout="wide", page_title="Smart Parking Dashboard", page_icon="🚗")
 
-# --- TITLE AND DESCRIPTION ---
-st.title("🚗 Smart Parking Analysis System - MVP Demo")
-st.markdown("""
-Welcome to the live demonstration of the **Smart Parking Analysis System**.
-This system utilizes a custom-trained **YOLOv8 Nano** model, trained on the PKLot dataset (achieving ~99% mAP), to detect vehicles and determine parking spot status in real-time.
+st.title("🚗 Smart Parking Management System")
+st.write("Monitor real-time camera feeds and predict future parking availability using AI.")
 
----
-""")
-
-# --- LOAD MODEL (Cached to avoid reloading) ---
+# --- LOAD MACHINE LEARNING MODEL ---
+# Using st.cache_resource so the model loads only once, keeping the app fast
 @st.cache_resource
-def load_yolo_model():
-    # Assumes 'best.pt' is in the current directory or provide the full path
+def load_ml_model():
     try:
-        model = YOLO('best.pt')
-        return model
-    except Exception as e:
-        st.error(f"Error loading model: {e}. Make sure 'best.pt' is in the project directory.")
+        return joblib.load('parking_model.pkl')
+    except FileNotFoundError:
         return None
 
-# Load the trained brain
-model = load_yolo_model()
+ml_model = load_ml_model()
 
-# --- MAIN SECTION: FILE UPLOADER ---
-st.header("1. Upload Parking Lot Image")
-uploaded_file = st.file_uploader("Choose a JPG/PNG file...", type=["jpg", "jpeg", "png"])
+# --- CREATE TABS FOR UI ---
+tab_live, tab_predict = st.tabs(["📷 Real-Time Detection", "🔮 Future Prediction"])
 
-if uploaded_file is not None:
-    # Display a spinner during processing
-    with st.spinner('AI Brain is analyzing the image... please wait...'):
-        
-        # --- PRE-PROCESSING ---
-        # Load the image using PIL
-        image = Image.open(uploaded_file)
-        
-        # Convert PIL image to NumPy array (RGB)
-        img_array = np.array(image)
-        
-        # Convert to OpenCV format (BGR) for YOLO inference
-        img_cv = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-        
-        # --- AI INFERENCE ---
-        # Run YOLOv8 prediction (using conf=0.4 balance from testing)
-        results = model.predict(source=img_cv, conf=0.4, save=False)[0]
-        
-        # Initialize counters
-        empty_spaces = 0
-        occupied_spaces = 0
-        
-        # --- POST-PROCESSING & VISUALIZATION ---
-        # Draw on the BGR image (OpenCV style)
-        for box in results.boxes:
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            class_id = int(box.cls[0])
-            conf = float(box.conf[0])
-            
-            # Define colors and labels (BGR)
-            if class_id == 0: # Empty
-                empty_spaces += 1
-                color = (0, 255, 0) # Green
-                label = f"Empty ({conf:.2f})"
-            else: # Occupied
-                occupied_spaces += 1
-                color = (0, 0, 255) # Red
-                label = f"Occupied ({conf:.2f})"
-            
-            # Draw standard rectangular box (no orientation needed for MVP demo)
-            cv2.rectangle(img_cv, (x1, y1), (x2, y2), color, 2)
-            
-            # Draw label background
-            (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            cv2.rectangle(img_cv, (x1, y1 - 20), (x1 + w, y1), color, -1)
-            
-            # Draw white text
-            cv2.putText(img_cv, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+# ==========================================
+# TAB 1: REAL-TIME COMPUTER VISION (YOLOv8)
+# ==========================================
+with tab_live:
+    st.header("Live Camera Analysis")
+    # FastAPI backend URLs
+    API_URL_JSON = "http://127.0.0.1:8000/predict"
+    API_URL_IMAGE = "http://127.0.0.1:8000/predict-image"
 
-        # Convert back to RGB for Streamlit display
-        processed_img_rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
+    uploaded_file = st.file_uploader("Choose a parking lot image for live detection...", type=["jpg", "jpeg", "png"])
+
+    if uploaded_file is not None:
+        col1, col2 = st.columns(2)
         
-        # --- UI LAYOUT: RESULTS & METRICS ---
-        st.header("2. Real-Time Analysis Results")
-        
-        # Create columns for image and metrics
-        col_img, col_metrics = st.columns([2, 1])
-        
-        with col_img:
-            st.image(processed_img_rgb, caption='AI Analysis Result', use_container_width=True)
+        with col1:
+            st.subheader("Original Camera Feed")
+            original_image = Image.open(uploaded_file)
+            st.image(original_image, use_container_width=True)
             
-        with col_metrics:
-            st.subheader("System Metrics")
-            total_spaces = empty_spaces + occupied_spaces
-            st.metric(label="Total Spaces Detected", value=total_spaces)
-            
-            c1, c2 = st.columns(2)
-            c1.metric(label="Empty Spaces ✅", value=empty_spaces)
-            c2.metric(label="Occupied Spaces 🚗", value=occupied_spaces)
-            
-            st.info(f"YOLO found {empty_spaces} empty and {occupied_spaces} occupied spots.")
-            
-            # Show Raw Detections (optional)
-            if st.checkbox('Show raw detections JSON'):
-                st.json(results.to_json())
+        with st.spinner("Analyzing parking spaces with YOLOv8..."):
+            try:
+                file_bytes = uploaded_file.getvalue()
                 
-else:
-    st.info("Please upload an image to see the smart parking analysis in action!")
+                # Request JSON data and Image data
+                files_json = {"file": (uploaded_file.name, file_bytes, uploaded_file.type)}
+                response_json = requests.post(API_URL_JSON, files=files_json)
+                
+                files_img = {"file": (uploaded_file.name, file_bytes, uploaded_file.type)}
+                response_img = requests.post(API_URL_IMAGE, files=files_img)
+                
+                if response_json.status_code == 200 and response_img.status_code == 200:
+                    data = response_json.json()
+                    
+                    with col2:
+                        st.subheader("Live Detection Results")
+                        result_image = Image.open(io.BytesIO(response_img.content))
+                        st.image(result_image, use_container_width=True)
+                        
+                        st.markdown("### 📊 Analytics Summary")
+                        summary = data["summary"]
+                        m1, m2, m3 = st.columns(3)
+                        m1.metric("Total Monitored", summary["total_monitored_spaces"])
+                        m2.metric("🟢 Available", summary["empty_spaces"])
+                        m3.metric("🔴 Occupied", summary["occupied_spaces"])
+                else:
+                    st.error("API Error: Something went wrong during prediction.")
+                    
+            except requests.exceptions.ConnectionError:
+                st.error("🚨 Could not connect to Backend. Ensure FastAPI is running.")
+
+# ==========================================
+# TAB 2: FUTURE PREDICTION (RANDOM FOREST)
+# ==========================================
+# ==========================================
+# TAB 2: FUTURE PREDICTION (RANDOM FOREST)
+# ==========================================
+with tab_predict:
+    st.header("Forecast Parking Availability")
+    
+    if ml_model is None:
+        st.error("🚨 Machine Learning model not found! Please place 'parking_model.pkl' in the project directory.")
+    else:
+        st.write("Select a future date and time to estimate how crowded the parking lot will be.")
+        
+        col_input, col_results = st.columns([1, 2])
+        
+        with col_input:
+            st.subheader("Time Settings")
+            target_date = st.date_input("Select Date", datetime.date.today())
+            
+            # --- YENİ MANUEL SAAT GİRİŞİ ---
+            # Liste yerine sadece klavyeden 0-23 arası sayı girilen alan
+            hour = st.number_input("Enter Hour (0-23)", min_value=0, max_value=23, value=12, step=1)
+            
+            # Extract features for the ML Model
+            day_of_week = target_date.weekday()
+            is_weekend = 1 if day_of_week >= 5 else 0
+            
+            days_str = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            st.info(f"Targeting: **{days_str[day_of_week]}**, at **{hour}:00**")
+            
+            predict_btn = st.button("Generate Forecast 🚀", type="primary", use_container_width=True)
+            
+        if predict_btn:
+            with col_results:
+                st.subheader("AI Forecast Results")
+                
+                # Format inputs as a DataFrame for Scikit-Learn
+                input_df = pd.DataFrame({
+                    'day_of_week': [day_of_week],
+                    'hour': [hour],
+                    'is_weekend': [is_weekend]
+                })
+                
+                # Get prediction
+                prediction = ml_model.predict(input_df)[0]
+                total_spaces = 44 # Based on our calibration
+                
+                # Round and logic checks
+                predicted_occupied = int(round(prediction))
+                predicted_occupied = max(0, min(total_spaces, predicted_occupied))
+                predicted_empty = total_spaces - predicted_occupied
+                
+                # Display metrics
+                r1, r2, r3 = st.columns(3)
+                r1.metric("Total Spots", total_spaces)
+                r2.metric("🟢 Expected Empty", predicted_empty)
+                r3.metric("🔴 Expected Occupied", predicted_occupied)
+                
+                # Display visual progress bar
+                occupancy_rate = int((predicted_occupied / total_spaces) * 100)
+                st.progress(occupancy_rate / 100.0, text=f"Estimated Occupancy Rate: {occupancy_rate}%")
+                
+                # Simple insight message
+                if occupancy_rate > 85:
+                    st.warning("⚠️ High demand expected. Finding a spot might be difficult.")
+                elif occupancy_rate < 30:
+                    st.success("✅ Lots of spaces available. Easy parking expected.")
+                else:
+                    st.info("ℹ️ Moderate demand expected.")
