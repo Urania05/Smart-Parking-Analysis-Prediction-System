@@ -37,10 +37,54 @@ As part of our continuous risk management, we have updated our initial Risk Matr
 * **R01 (CV Accuracy) - UPDATE:** * *Initial State:* High Risk (Score: 16). 
   * *Current State:* **Low Risk (Score: 4).** * *Reason:* The custom YOLOv8 model trained on the PKLot dataset achieved an unexpectedly high mAP50 of 99%. The probability of the model failing to detect vehicles in standard CCTV angles has drastically decreased.
 
+
+
 * **R04 (Failure to deliver MVP on time) - UPDATE:**
   * *Initial State:* Medium Risk (Score: 10).
   * *Current State:* **Resolved / Closed.**
   * *Reason:* The core MVP (Backend + Frontend + Model) has been successfully completed and deployed locally well within the 14-week constraint.
 
 ---
+
+classDiagram
+    %% Abstract Base Class
+    class Vehicle {
+        <<abstract>>
+        -ticket_id: str
+        -entry_time: datetime
+        +get_ticket_id(): str
+        +get_entry_time(): datetime
+        +calculate_fee(exit_time: datetime)* float
+    }
+
+    %% Derived Class
+    class Car {
+        -hourly_rate: float
+        +calculate_fee(exit_time: datetime): float
+    }
+
+    %% Spot Class
+    class ParkingSpot {
+        -spot_id: str
+        -current_vehicle: Vehicle
+        +get_spot_id(): str
+        +is_occupied(): bool
+        +park_vehicle(vehicle: Vehicle): void
+        +remove_vehicle(): Vehicle
+    }
+
+    %% Manager Class
+    class ParkingLot {
+        -spots: List~ParkingSpot~
+        +find_available_spot(): ParkingSpot
+        +get_total_available_spots(): int
+        +get_spot_by_id(spot_id: str): ParkingSpot
+    }
+
+    %% Relationships
+    Vehicle <|-- Car : Inheritance (Kalıtım)
+    ParkingSpot o-- Vehicle : Aggregation (Birleştirme)
+    ParkingLot *-- ParkingSpot : Composition (Kompozisyon)
+
+   
 *Developed for Software Project Management Course*
