@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import simpledialog
 
 # Configuration
-IMAGE_PATH = r"C:\Users\kemal\Desktop\Smart Parking Analysis & Prediction System\Footage\smart_parking_demo_sample_4.jpg"
+IMAGE_PATH = r"insert_path.jpg"
 OUTPUT_JSON = 'rois.json'
 
 # Global variables
