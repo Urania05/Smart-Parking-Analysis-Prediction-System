@@ -17,7 +17,8 @@ root = tk.Tk()
 root.withdraw() # We only want the popup dialog, not the main empty window
 
 def draw_rectangle(event, x, y, flags, param):
-    global points, rois, img, clone
+    # FIXED: Flake8 F824 - removed rois, img, and clone since they aren't reassigned
+    global points
 
     # Left mouse button click (start drawing)
     if event == cv2.EVENT_LBUTTONDOWN:
