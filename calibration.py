@@ -7,7 +7,7 @@ from database import SessionLocal
 import models
 
 # Configuration
-IMAGE_PATH = r"Footage\smart_parking_demo_sample_4.jpg"
+IMAGE_PATH = r"insert_path.jpg"
 OUTPUT_JSON = 'rois.json'
 
 # Global variables
