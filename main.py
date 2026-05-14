@@ -9,62 +9,55 @@ import io
 from PIL import Image
 import json
 from oop_core import ParkingLot, Car
+from rbac import require_role, get_current_user
+from models import Role
 
-# Import database connection and model files
 import models
 import database
 
-# Initialize the FastAPI application
+# Initialize FastAPI application
 app = FastAPI(
     title="Smart Parking API",
     description="Real-time vehicle detection and parking space analysis API using YOLOv8 with PostgreSQL.",
     version="1.0.0"
 )
 
-# Create tables in PostgreSQL on startup if they don't exist
+# Initialize database tables
 models.Base.metadata.create_all(bind=database.engine)
 
-# Load the YOLOv8 model
+# Load YOLOv8 model
 try:
     model = YOLO('best.pt')
     print("Model loaded successfully!")
 except Exception as e:
     print(f"Error loading model: {e}")
 
-# --- PARKING SPOTS (ROIs) LOADING ---
-# Dynamically load coordinates from our calibration file instead of hardcoding them.
+# Load calibration data (ROIs)
 try:
     with open('rois.json', 'r') as f:
         PARKING_SPOTS = json.load(f)
-    print(f"Calibration file loaded successfully. Monitoring {len(PARKING_SPOTS)} parking spots.")
-    
+    print(f"Calibration loaded. Monitoring {len(PARKING_SPOTS)} parking spots.")
 except FileNotFoundError:
-    print("ERROR: 'rois.json' not found. Please run calibration.py script first.")
+    print("ERROR: 'rois.json' not found. Please run the calibration script first.")
     PARKING_SPOTS = {}
 
 lot_manager = ParkingLot(spot_names=list(PARKING_SPOTS.keys()))
 
-# --- IoU CALCULATION FUNCTION ---
 def calculate_iou(box1, box2):
-    """
-    Calculate the Intersection over Union (IoU) of two bounding boxes.
-    box format: [x1, y1, x2, y2]
-    """
+    """Calculate Intersection over Union (IoU) for bounding boxes."""
     x_left = max(box1[0], box2[0])
     y_top = max(box1[1], box2[1])
     x_right = min(box1[2], box2[2])
     y_bottom = min(box1[3], box2[3])
 
     if x_right < x_left or y_bottom < y_top:
-        return 0.0 # No intersection
+        return 0.0 
 
     intersection_area = (x_right - x_left) * (y_bottom - y_top)
-    
     box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
     box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
     
-    iou = intersection_area / float(box1_area + box2_area - intersection_area)
-    return iou
+    return intersection_area / float(box1_area + box2_area - intersection_area)
 
 @app.get("/")
 def read_root():
@@ -72,16 +65,44 @@ def read_root():
 
 @app.get("/spots/")
 def get_spots(db: Session = Depends(database.get_db)):
-    spots = db.query(models.ParkingSpot).all()
-    return spots
+    return db.query(models.ParkingSpot).all()
 
-@app.get("/logs/")
-def get_logs(db: Session = Depends(database.get_db)):
-    logs = db.query(models.ParkingLog).order_by(models.ParkingLog.id.desc()).limit(20).all()
-    return logs
+@app.get("/logs/", summary="Get Parking Logs (ADMIN ONLY)")
+def get_logs(
+    db: Session = Depends(database.get_db), 
+    current_user: models.User = Depends(require_role(Role.ADMIN)) 
+):
+    print(f"RBAC Log: User '{current_user.username}' requested logs.")
+    return db.query(models.ParkingLog).order_by(models.ParkingLog.id.desc()).limit(20).all()
+
+# --- DYNAMIC DATABASE ENDPOINTS ---
+
+@app.get("/status/", summary="Get Real-Time Parking Status")
+def get_parking_status(db: Session = Depends(database.get_db)):
+    total_spots = db.query(models.ParkingSpot).count()
+    occupied = db.query(models.ParkingSpot).filter(models.ParkingSpot.is_occupied == True).count()
+    available = total_spots - occupied
+    
+    if total_spots == 0:
+        return {"total_spots": 0, "occupied": 0, "available": 0}
+        
+    return {
+        "total_spots": total_spots, 
+        "occupied": occupied, 
+        "available": available
+    }
+
+@app.post("/assign-spot/", summary="Assign an available spot to a customer")
+def assign_spot(db: Session = Depends(database.get_db)):
+    available_spot = db.query(models.ParkingSpot).filter(models.ParkingSpot.is_occupied == False).first()
+    
+    if not available_spot:
+        raise HTTPException(status_code=404, detail="Parking lot is completely full.")
+    
+    return {"assigned_spot": available_spot.spot_number}
 
 # ==========================================
-# ENDPOINT 1: JSON DATA (DATABASE UPDATE)
+# JSON DATA PROCESSING (DATABASE UPDATE)
 # ==========================================
 @app.post("/predict")
 async def predict_parking(file: UploadFile = File(...), db: Session = Depends(database.get_db)):
@@ -121,25 +142,24 @@ async def predict_parking(file: UploadFile = File(...), db: Session = Depends(da
                 current_frame_status[best_spot_id]["vehicle_class"] = vehicle_class 
                 
                 spot = lot_manager.get_spot_by_id(best_spot_id)
-                
                 if spot and not spot.is_occupied():
                     new_vehicle = Car() 
                     spot.park_vehicle(new_vehicle)
-                    print(f"OOP Log: Vehicle with ticket {new_vehicle.get_ticket_id()} entered spot {best_spot_id}.")
+                    print(f"OOP Log: Vehicle ticket {new_vehicle.get_ticket_id()} entered {best_spot_id}.")
 
-            for spot_id in PARKING_SPOTS.keys():
-                spot = lot_manager.get_spot_by_id(spot_id)
-
-                if spot and spot.is_occupied() and not current_frame_status[spot_id]["is_occupied"]:
-                    departing_vehicle = spot.remove_vehicle()
-                    if departing_vehicle:  # Araç gerçekten varsa
-                        fee = departing_vehicle.calculate_fee(datetime.now())
-                        print(f"OOP Log: Vehicle exited spot {spot_id}. Total Fee: ${fee}")
+        for spot_id in PARKING_SPOTS.keys():
+            spot = lot_manager.get_spot_by_id(spot_id)
+            if spot and spot.is_occupied() and not current_frame_status[spot_id]["is_occupied"]:
+                departing_vehicle = spot.remove_vehicle()
+                if departing_vehicle:
+                    fee = departing_vehicle.calculate_fee(datetime.now())
+                    print(f"OOP Log: Vehicle exited {spot_id}. Total Fee: ${fee}")
 
         detections_response = []
         occupied_count = 0
         empty_count = 0
 
+        # Update database with current frame status
         for spot_id, status_data in current_frame_status.items():
             is_occupied = status_data["is_occupied"]
             
@@ -193,7 +213,7 @@ async def predict_parking(file: UploadFile = File(...), db: Session = Depends(da
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 # ==========================================
-# ENDPOINT 2: VISUAL DATA (DRAWN IMAGE)
+# VISUAL DATA PROCESSING (DRAWN IMAGE)
 # ==========================================
 @app.post("/predict-image")
 async def predict_parking_image(file: UploadFile = File(...), db: Session = Depends(database.get_db)):
@@ -210,10 +230,10 @@ async def predict_parking_image(file: UploadFile = File(...), db: Session = Depe
             for spot_id in PARKING_SPOTS.keys()
         }
         
-        # YOLO Detection and IoU Intersection
         for box in results.boxes:
             class_id = int(box.cls[0])
-            if class_id == 0: continue 
+            if class_id == 0: 
+                continue 
                 
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             yolo_box = [x1, y1, x2, y2]
@@ -231,35 +251,32 @@ async def predict_parking_image(file: UploadFile = File(...), db: Session = Depe
                 current_frame_status[best_spot_id]["is_occupied"] = True
                 
                 spot = lot_manager.get_spot_by_id(best_spot_id)
-                
                 if spot and not spot.is_occupied():
                     new_vehicle = Car() 
                     spot.park_vehicle(new_vehicle)
 
         for spot_id in PARKING_SPOTS.keys():
             spot = lot_manager.get_spot_by_id(spot_id)
-
             if spot and spot.is_occupied() and not current_frame_status[spot_id]["is_occupied"]:
                 departing_vehicle = spot.remove_vehicle()
                 if departing_vehicle:  
                     fee = departing_vehicle.calculate_fee(datetime.now())
 
-        # Draw on Image (Red/Green Boxes)
+        # Render bounding boxes on image
         for spot_id, coords in PARKING_SPOTS.items():
             x1, y1, x2, y2 = coords
             is_occupied = current_frame_status[spot_id]["is_occupied"]
             
             if is_occupied:
-                color = (0, 0, 255)  # Red (in BGR format)
+                color = (0, 0, 255)  
                 label = f"{spot_id} (Occupied)"
             else:
-                color = (0, 255, 0)  # Green
+                color = (0, 255, 0)  
                 label = f"{spot_id} (Empty)"
                 
             cv2.rectangle(img_cv, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
             cv2.putText(img_cv, label, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-        # Return the drawn image as JPEG
         _, encoded_img = cv2.imencode('.jpg', img_cv)
         return Response(content=encoded_img.tobytes(), media_type="image/jpeg")
 

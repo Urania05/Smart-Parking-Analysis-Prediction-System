@@ -1,18 +1,16 @@
 @echo off
-echo =======================================================
-echo  Starting Smart Parking Analysis System MVP...
-echo  Engine: YOLOv8 Nano ^| Interface: Streamlit
-echo =======================================================
-echo.
+echo =========================================
+echo SMART PARKING SISTEMI BASLATILIYOR...
+echo =========================================
 
-if exist venv\Scripts\activate (
-    echo Activating Virtual Environment...
-    call venv\Scripts\activate
-)
+echo [1/2] Arka Uc (FastAPI) Ayaga Kaldiriliyor...
+start cmd /k "uvicorn main:app --reload"
 
-echo Launching the Dashboard...
-timeout /t 2 /nobreak > NUL
+:: Arka ucun baslamasi icin 3 saniye bekleme (Opsiyonel ama sagliklidir)
+timeout /t 3 /nobreak > NUL
 
-streamlit run app.py
+echo [2/2] On Uc (Streamlit) Ayaga Kaldiriliyor...
+start cmd /k "streamlit run app.py"
 
-pause
+echo Sistem basariyla tetiklendi! Bu pencereyi kapatabilirsiniz.
+exit

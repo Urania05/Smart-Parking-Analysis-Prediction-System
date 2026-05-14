@@ -3,9 +3,11 @@ import json
 import os
 import tkinter as tk
 from tkinter import simpledialog
+from database import SessionLocal
+import models
 
 # Configuration
-IMAGE_PATH = r"C:\Users\kemal\Desktop\Smart Parking Analysis & Prediction System\Footage\smart_parking_demo_sample_4.jpg"
+IMAGE_PATH = r"Footage\smart_parking_demo_sample_4.jpg"
 OUTPUT_JSON = 'rois.json'
 
 # Global variables
@@ -88,9 +90,38 @@ while True:
     if key == ord("q"):
         break
 
-# Save to JSON file
+# --- SAVE TO JSON AND DATABASE ---
+# 1. Save to JSON (as a backup)
 with open(OUTPUT_JSON, 'w') as f:
     json.dump(rois, f, indent=4)
+print(f"\n[1/2] JSON backup saved to '{OUTPUT_JSON}'.")
 
-print(f"\nGreat! All parking spot coordinates have been successfully saved to '{OUTPUT_JSON}'.")
+# 2. Save to PostgreSQL Database
+print("[2/2] Syncing with PostgreSQL database...")
+db = SessionLocal()
+try:
+    # Bozuk veya eski koordinatları temizle
+    db.query(models.ParkingSpot).delete()
+
+    for spot_name, coords in rois.items():
+        coords_dict = {
+            "tl": [coords[0], coords[1]], 
+            "br": [coords[2], coords[3]]
+        }
+        
+        new_spot = models.ParkingSpot(
+            spot_id=spot_name,
+            is_occupied=False,
+            coords_json=json.dumps(coords_dict)
+        )
+        db.add(new_spot)
+
+    db.commit()
+    print("SUCCESS: Database is now in sync with your manual calibration! 🚀")
+except Exception as e:
+    print(f"FAILED to sync database: {e}")
+    db.rollback()
+finally:
+    db.close()
+
 cv2.destroyAllWindows()

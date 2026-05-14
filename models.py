@@ -1,7 +1,21 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum as SQLEnum 
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from database import Base # Noktasız import (Aynı klasörde oldukları için)
+from database import Base 
+import enum
+
+class Role(enum.Enum):
+    ADMIN = "admin"
+    OPERATOR = "operator"
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True)
+    api_key = Column(String, unique=True, index=True)
+    role = Column(SQLEnum(Role), default=Role.OPERATOR)  
+
 
 class ParkingSpot(Base):
     __tablename__ = "parking_spots"
