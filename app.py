@@ -140,7 +140,11 @@ else:
         if ml_model is None:
             st.error("Machine Learning model not found! Please place 'parking_model.pkl' in the project directory.")
         else:
-            total_spaces = 44 # Update this based on your calibration
+            try:
+                status_req = requests.get("http://127.0.0.1:8000/status/", timeout=2)
+                total_spaces = status_req.json().get("total_spots", 10)
+            except:
+                total_spaces = 10
             
             now = datetime.datetime.now()
             forecast_data = []
