@@ -83,9 +83,9 @@ classDiagram
     }
 
     %% Relationships
-    Vehicle <|-- Car : Inheritance (Kalıtım)
-    ParkingSpot o-- Vehicle : Aggregation (Birleştirme)
-    ParkingLot *-- ParkingSpot : Composition (Kompozisyon)
+    Vehicle <|-- Car : Inheritance
+    ParkingSpot o-- Vehicle : Aggregation
+    ParkingLot *-- ParkingSpot : Composition
 ```
    
 *Developed for Software Project Management Course*
